@@ -9,6 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download models into the image so cold starts load from disk, not the network
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
+SentenceTransformer('all-MiniLM-L6-v2'); \
+CrossEncoder('cross-encoder/nli-deberta-v3-xsmall')"
+
 COPY . .
 
 EXPOSE 7860
