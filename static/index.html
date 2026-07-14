@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GDPR Compliance Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div class="seal-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="40" height="40">
+          <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="24" cy="24" r="15" fill="none" stroke="currentColor" stroke-width="1"/>
+          <path d="M24 12 L16 22 L24 36 L32 22 Z" fill="currentColor" opacity="0.85"/>
+        </svg>
+      </div>
+      <div>
+        <p class="eyebrow">Automated Article-by-Article Review</p>
+        <h1>GDPR Compliance Check</h1>
+      </div>
+    </header>
+
+    <section class="intake" id="intake">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="pdf" role="tab">Upload PDF</button>
+        <button class="tab" data-tab="text" role="tab">Paste Text</button>
+        <button class="tab" data-tab="url" role="tab">Paste Link</button>
+      </div>
+
+      <div class="tab-panel active" data-panel="pdf">
+        <label class="dropzone" for="pdf-input">
+          <span>Drop a privacy policy PDF, or click to browse</span>
+          <input type="file" id="pdf-input" accept="application/pdf" hidden>
+        </label>
+        <p class="file-name" id="pdf-filename"></p>
+      </div>
+
+      <div class="tab-panel" data-panel="text">
+        <textarea id="text-input" placeholder="Paste the full privacy policy text here…" rows="8"></textarea>
+      </div>
+
+      <div class="tab-panel" data-panel="url">
+        <input type="url" id="url-input" placeholder="https://example.com/privacy">
+      </div>
+
+      <button class="run-btn" id="run-btn">Run Compliance Check →</button>
+
+      <div class="progress" id="progress" hidden>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="progress-label" id="progress-label">Reviewing…</p>
+      </div>
+
+      <p class="error-msg" id="error-msg" hidden></p>
+    </section>
+
+    <section class="report" id="report" hidden>
+      <div class="stamp">
+        <svg viewBox="0 0 200 200" width="180" height="180">
+          <circle cx="100" cy="100" r="92" fill="none" stroke="var(--ink-muted)" stroke-width="1" stroke-dasharray="2 4"/>
+          <circle cx="100" cy="100" r="80" fill="none" stroke="var(--gold)" stroke-width="3"
+                  id="stamp-ring" stroke-dasharray="502" stroke-dashoffset="502" transform="rotate(-90 100 100)"/>
+          <text x="100" y="95" text-anchor="middle" class="stamp-score" id="stamp-score">—</text>
+          <text x="100" y="118" text-anchor="middle" class="stamp-caption">GDPR ALIGNED</text>
+        </svg>
+      </div>
+
+      <div class="categories" id="categories"></div>
+
+      <h2 class="ledger-title">Findings Ledger</h2>
+      <div class="ledger" id="ledger"></div>
+
+      <button class="reset-btn" id="reset-btn">Start a new policy</button>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
