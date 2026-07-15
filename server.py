@@ -25,7 +25,6 @@ evaluator = CrossEncoderComplianceEvaluator(model_name="cross-encoder/nli-debert
 scorer = ComplianceScorer()
 
 # In-memory job store -- fine for a single-user local prototype.
-# For multi-user/production use you'd swap this for Redis or a DB.
 jobs = {}
 jobs_lock = threading.Lock()
 
@@ -33,7 +32,6 @@ TOTAL_REQUIREMENTS = sum(len(reqs) for reqs in GDPR_REQUIREMENTS.values())
 
 
 def _report_to_dict(report):
-    # Works whether the project has pydantic v1 or v2 installed
     return report.model_dump() if hasattr(report, "model_dump") else report.dict()
 
 
@@ -105,32 +103,35 @@ def evaluate_url():
     except PolicyNotFoundError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
-        return jsonify({"error": f"Couldn't fetch that URL: {e}"}), 400
-    except Exception as e:
-        return jsonify({
-        "error": f"Couldn't fetch that URL ({e}). Some sites block automated "
-                  f"requests — try the 'Paste Text' tab instead if this persists."
-    }), 400
-
-    return jsonify({"job_id": _start_job(chunks)})
-
-
-@app.route("/api/evaluate/url", methods=["POST"])
-def evaluate_url():
-    data = request.get_json(force=True) or {}
-    url = data.get("url", "").strip()
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
-    try:
-        chunks = url_loader.load(url)
-    except PolicyNotFoundError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
         return jsonify({
             "error": f"Couldn't fetch that URL ({e}). Some sites block automated "
                      f"requests — try the 'Paste Text' tab instead if this persists."
         }), 400
+
+    return jsonify({"job_id": _start_job(chunks)})
+
+
+@app.route("/api/evaluate/pdf", methods=["POST"])
+def evaluate_pdf():
+    if "file" not in request.files or request.files["file"].filename == "":
+        return jsonify({"error": "No file uploaded"}), 400
+
+    uploaded = request.files["file"]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        uploaded.save(tmp.name)
+        pdf_path = tmp.name
+
+    try:
+        chunks = pdf_loader.load(pdf_path)
+    finally:
+        os.remove(pdf_path)
+
+    if not chunks:
+        return jsonify({"error": "Couldn't extract any text from that PDF"}), 400
+
+    return jsonify({"job_id": _start_job(chunks)})
+
+
 @app.route("/api/evaluate/status/<job_id>", methods=["GET"])
 def evaluate_status(job_id):
     with jobs_lock:
@@ -144,6 +145,7 @@ def evaluate_status(job_id):
 def reset():
     vector_store.clear_namespace("user_policy")
     return jsonify({"status": "reset"})
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
