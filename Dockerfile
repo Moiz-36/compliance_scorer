@@ -20,7 +20,8 @@ ENV TRANSFORMERS_OFFLINE=1
 
 COPY . .
 
-EXPOSE 7860
-ENV PORT=7860
+# EXPOSE 8080 so Cloud Run matches perfectly
+EXPOSE 8080
+ENV PORT=8080
 
 CMD ["python", "server.py"]
