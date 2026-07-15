@@ -14,6 +14,10 @@ RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncod
 SentenceTransformer('all-MiniLM-L6-v2'); \
 CrossEncoder('cross-encoder/nli-deberta-v3-xsmall')"
 
+# Force fully offline model loading -- no Hugging Face Hub contact at runtime
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+
 COPY . .
 
 EXPOSE 7860
