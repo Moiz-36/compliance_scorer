@@ -106,6 +106,11 @@ def evaluate_url():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Couldn't fetch that URL: {e}"}), 400
+    except Exception as e:
+        return jsonify({
+        "error": f"Couldn't fetch that URL ({e}). Some sites block automated "
+                  f"requests — try the 'Paste Text' tab instead if this persists."
+    }), 400
 
     return jsonify({"job_id": _start_job(chunks)})
 
