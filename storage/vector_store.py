@@ -5,16 +5,19 @@ from core.interfaces import BaseVectorStore
 from core.models import DocumentChunk
 
 
-class ChromaVectorStore(BaseVectorStore):
-    """
-    Concrete implementation of BaseVectorStore using ChromaDB.
-    """
+# In storage/vector_store.py, change this:
+# class ChromaVectorStore(BaseVectorStore):
+#     def __init__(self, persist_dir: str = "./chroma_db"):
 
-    def __init__(self, persist_dir: str = "./chroma_db"):
+# To this:
+class ChromaVectorStore(BaseVectorStore):
+    def __init__(self, persist_dir: str = "/tmp/chroma_db"):
+
+     def __init__(self, persist_dir: str = "./chroma_db"):
         self.client = chromadb.PersistentClient(path=persist_dir)
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    def add_chunks(self, chunks: list[DocumentChunk], namespace: str) -> None:
+     def add_chunks(self, chunks: list[DocumentChunk], namespace: str) -> None:
         collection = self.client.get_or_create_collection(name=namespace)
         embeddings = self.model.encode([c.content for c in chunks]).tolist()
 
@@ -25,14 +28,14 @@ class ChromaVectorStore(BaseVectorStore):
             metadatas=[c.metadata for c in chunks],
         )
         
-    def clear_namespace(self, namespace: str) -> None:
+     def clear_namespace(self, namespace: str) -> None:
         try:
             self.client.delete_collection(name=namespace)
         except Exception:
             # Collection didn't exist yet -- nothing to clear
             pass
 
-    def similarity_search(
+     def similarity_search(
         self, query: str, namespace: str, k: int = 3
     ) -> list[DocumentChunk]:
         collection = self.client.get_or_create_collection(name=namespace)
