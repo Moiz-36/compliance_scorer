@@ -25,29 +25,34 @@ vector_store = ChromaVectorStore()
 evaluator = CrossEncoderComplianceEvaluator(model_name="cross-encoder/nli-deberta-v3-xsmall")
 scorer = ComplianceScorer()
 
-# In-memory job store
+# In-memory job store -- fine for a single-instance prototype
 jobs = {}
 jobs_lock = threading.Lock()
 
 TOTAL_REQUIREMENTS = sum(len(reqs) for reqs in GDPR_REQUIREMENTS.values())
 
+POLICY_SIGNAL_PHRASES = [
+    "privacy policy", "personal data", "personal information", "data controller",
+    "data protection", "your rights", "data subject", "processing of your data",
+    "third parties", "data retention", "opt out", "cookies", "gdpr",
+    "right to access", "right to erasure", "right to be forgotten",
+    "datenschutz", "verarbeitung",
+]
+MIN_SIGNAL_MATCHES = 3
+
 
 def _is_valid_policy_text(text: str) -> bool:
-    """Validates if the pasted text is an actual privacy policy."""
-    # 1. Reject single URLs
-    if re.match(r'^https?://[^\s]+$', text, re.IGNORECASE):
+    """Validates if the pasted text is an actual privacy policy, not just
+    any text that happens to contain a common word like 'data' once."""
+    if re.match(r'^https?://\S+$', text.strip(), re.IGNORECASE):
         return False
 
-    # 2. Reject short snippets
     if len(text) < 150:
         return False
 
-    # 3. Reject text lacking basic privacy terminology
-    keywords = ["privacy", "policy", "data", "terms", "collect", "personal", "information", "cookies", "datenschutz", "verarbeitung"]
-    if not any(kw in text.lower() for kw in keywords):
-        return False
-
-    return True
+    lowered = text.lower()
+    matches = sum(1 for phrase in POLICY_SIGNAL_PHRASES if phrase in lowered)
+    return matches >= MIN_SIGNAL_MATCHES
 
 
 def _report_to_dict(report):
@@ -55,19 +60,19 @@ def _report_to_dict(report):
 
 
 def _run_evaluation(job_id: str, chunks):
+    namespace = f"policy_{job_id}"  # unique per job -- no cross-user collisions
     try:
         with jobs_lock:
             jobs[job_id].update(status="processing", completed=0, total=TOTAL_REQUIREMENTS)
 
-        vector_store.clear_namespace("user_policy")
-        vector_store.add_chunks(chunks, namespace="user_policy")
+        vector_store.add_chunks(chunks, namespace=namespace)
 
         evaluations_by_cat = {}
         for category, rules in GDPR_REQUIREMENTS.items():
             evaluations_by_cat[category] = []
             for req_id, req_desc in rules:
                 candidates = vector_store.similarity_search(
-                    query=req_desc, namespace="user_policy", k=3
+                    query=req_desc, namespace=namespace, k=3
                 )
                 result = evaluator.evaluate(req_id, req_desc, candidates)
                 evaluations_by_cat[category].append(result)
@@ -81,6 +86,9 @@ def _run_evaluation(job_id: str, chunks):
     except Exception as e:
         with jobs_lock:
             jobs[job_id].update(status="error", error=str(e))
+
+    finally:
+        vector_store.clear_namespace(namespace)
 
 
 def _start_job(chunks) -> str:
@@ -104,7 +112,9 @@ def evaluate_text():
         return jsonify({"error": "No text provided"}), 400
 
     if not _is_valid_policy_text(text):
-        return jsonify({"error": "wrong text"}), 400
+        return jsonify({
+            "error": "This doesn't look like a privacy policy. Paste the full policy text, not a URL or a short snippet."
+        }), 400
 
     chunks = text_loader.load(file_path=text, source_name="pasted_policy")
     if not chunks:
@@ -165,8 +175,8 @@ def evaluate_status(job_id):
 
 @app.route("/api/reset", methods=["POST"])
 def reset():
-    vector_store.clear_namespace("user_policy")
-    return jsonify({"status": "reset"})
+    # Nothing shared to clear -- each job owns and cleans up its own namespace
+    return jsonify({"status": "ok"})
 
 
 if __name__ == "__main__":
