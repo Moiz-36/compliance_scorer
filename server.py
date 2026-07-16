@@ -1,5 +1,6 @@
 # server.py
 import os
+import re
 import threading
 import uuid
 import tempfile
@@ -24,11 +25,29 @@ vector_store = ChromaVectorStore()
 evaluator = CrossEncoderComplianceEvaluator(model_name="cross-encoder/nli-deberta-v3-xsmall")
 scorer = ComplianceScorer()
 
-# In-memory job store -- fine for a single-user local prototype.
+# In-memory job store
 jobs = {}
 jobs_lock = threading.Lock()
 
 TOTAL_REQUIREMENTS = sum(len(reqs) for reqs in GDPR_REQUIREMENTS.values())
+
+
+def _is_valid_policy_text(text: str) -> bool:
+    """Validates if the pasted text is an actual privacy policy."""
+    # 1. Reject single URLs
+    if re.match(r'^https?://[^\s]+$', text, re.IGNORECASE):
+        return False
+
+    # 2. Reject short snippets
+    if len(text) < 150:
+        return False
+
+    # 3. Reject text lacking basic privacy terminology
+    keywords = ["privacy", "policy", "data", "terms", "collect", "personal", "information", "cookies", "datenschutz", "verarbeitung"]
+    if not any(kw in text.lower() for kw in keywords):
+        return False
+
+    return True
 
 
 def _report_to_dict(report):
@@ -83,6 +102,9 @@ def evaluate_text():
     text = data.get("text", "").strip()
     if not text:
         return jsonify({"error": "No text provided"}), 400
+
+    if not _is_valid_policy_text(text):
+        return jsonify({"error": "wrong text"}), 400
 
     chunks = text_loader.load(file_path=text, source_name="pasted_policy")
     if not chunks:
