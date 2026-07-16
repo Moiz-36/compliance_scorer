@@ -7,29 +7,69 @@ import tempfile
 
 from flask import Flask, request, jsonify, send_from_directory
 
-from ingestion.pdf_loader import PDFLoader
-from ingestion.raw_text_loader import RawTextLoader
-from ingestion.url_loader import URLLoader, PolicyNotFoundError
-from storage.vector_store import ChromaVectorStore
-from engine.compliance_evaluator import CrossEncoderComplianceEvaluator
-from engine.scorer import ComplianceScorer
-from core.gdpr_requirements import GDPR_REQUIREMENTS
-
 app = Flask(__name__, static_folder="static", static_url_path="")
 
-# Loaded once at startup -- these are the expensive objects (models, DB connection)
-pdf_loader = PDFLoader()
-text_loader = RawTextLoader()
-url_loader = URLLoader()
-vector_store = ChromaVectorStore()
-evaluator = CrossEncoderComplianceEvaluator(model_name="cross-encoder/nli-deberta-v3-xsmall")
-scorer = ComplianceScorer()
+# --- Lazy model loading -----------------------------------------------------
+# Cloud Run requires the container to start listening on its port quickly.
+# Loading ML models before Flask starts was pushing past that startup window.
+# Instead: Flask binds the port immediately, heavy models load in a
+# background thread, and requests made before loading finishes get a clear
+# 503 instead of the container failing to start at all.
 
-# In-memory job store -- fine for a single-instance prototype
-jobs = {}
-jobs_lock = threading.Lock()
+pdf_loader = None
+text_loader = None
+url_loader = None
+vector_store = None
+evaluator = None
+scorer = None
+GDPR_REQUIREMENTS = None
+TOTAL_REQUIREMENTS = 0
+PolicyNotFoundError = Exception  # placeholder, replaced once loaded
 
-TOTAL_REQUIREMENTS = sum(len(reqs) for reqs in GDPR_REQUIREMENTS.values())
+models_ready = threading.Event()
+models_loading_error = None
+
+
+def _load_models():
+    global pdf_loader, text_loader, url_loader, vector_store, evaluator, scorer
+    global GDPR_REQUIREMENTS, TOTAL_REQUIREMENTS, models_loading_error, PolicyNotFoundError
+    try:
+        from ingestion.pdf_loader import PDFLoader
+        from ingestion.raw_text_loader import RawTextLoader
+        from ingestion.url_loader import URLLoader, PolicyNotFoundError as PNF
+        from storage.vector_store import ChromaVectorStore
+        from engine.compliance_evaluator import CrossEncoderComplianceEvaluator
+        from engine.scorer import ComplianceScorer
+        from core.gdpr_requirements import GDPR_REQUIREMENTS as REQS
+
+        pdf_loader = PDFLoader()
+        text_loader = RawTextLoader()
+        url_loader = URLLoader()
+        vector_store = ChromaVectorStore()
+        evaluator = CrossEncoderComplianceEvaluator(model_name="cross-encoder/nli-deberta-v3-xsmall")
+        scorer = ComplianceScorer()
+        GDPR_REQUIREMENTS = REQS
+        TOTAL_REQUIREMENTS = sum(len(reqs) for reqs in REQS.values())
+        PolicyNotFoundError = PNF
+
+        models_ready.set()
+    except Exception as e:
+        models_loading_error = str(e)
+        models_ready.set()  # still set, so requests get a clear error instead of hanging
+
+
+threading.Thread(target=_load_models, daemon=True).start()
+
+
+def _not_ready_response():
+    if not models_ready.is_set():
+        return jsonify({"error": "Server is warming up, please try again in a few seconds."}), 503
+    if models_loading_error:
+        return jsonify({"error": f"Server failed to initialize: {models_loading_error}"}), 500
+    return None
+
+
+# --- Validation --------------------------------------------------------------
 
 POLICY_SIGNAL_PHRASES = [
     "privacy policy", "personal data", "personal information", "data controller",
@@ -42,14 +82,10 @@ MIN_SIGNAL_MATCHES = 3
 
 
 def _is_valid_policy_text(text: str) -> bool:
-    """Validates if the pasted text is an actual privacy policy, not just
-    any text that happens to contain a common word like 'data' once."""
     if re.match(r'^https?://\S+$', text.strip(), re.IGNORECASE):
         return False
-
     if len(text) < 150:
         return False
-
     lowered = text.lower()
     matches = sum(1 for phrase in POLICY_SIGNAL_PHRASES if phrase in lowered)
     return matches >= MIN_SIGNAL_MATCHES
@@ -59,8 +95,14 @@ def _report_to_dict(report):
     return report.model_dump() if hasattr(report, "model_dump") else report.dict()
 
 
+# --- Job handling --------------------------------------------------------------
+
+jobs = {}
+jobs_lock = threading.Lock()
+
+
 def _run_evaluation(job_id: str, chunks):
-    namespace = f"policy_{job_id}"  # unique per job -- no cross-user collisions
+    namespace = f"policy_{job_id}"
     try:
         with jobs_lock:
             jobs[job_id].update(status="processing", completed=0, total=TOTAL_REQUIREMENTS)
@@ -71,9 +113,7 @@ def _run_evaluation(job_id: str, chunks):
         for category, rules in GDPR_REQUIREMENTS.items():
             evaluations_by_cat[category] = []
             for req_id, req_desc in rules:
-                candidates = vector_store.similarity_search(
-                    query=req_desc, namespace=namespace, k=3
-                )
+                candidates = vector_store.similarity_search(query=req_desc, namespace=namespace, k=3)
                 result = evaluator.evaluate(req_id, req_desc, candidates)
                 evaluations_by_cat[category].append(result)
                 with jobs_lock:
@@ -99,13 +139,24 @@ def _start_job(chunks) -> str:
     return job_id
 
 
+# --- Routes --------------------------------------------------------------
+
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
+@app.route("/health")
+def health():
+    return jsonify({"ready": models_ready.is_set() and not models_loading_error})
+
+
 @app.route("/api/evaluate/text", methods=["POST"])
 def evaluate_text():
+    not_ready = _not_ready_response()
+    if not_ready:
+        return not_ready
+
     data = request.get_json(force=True) or {}
     text = data.get("text", "").strip()
     if not text:
@@ -125,6 +176,10 @@ def evaluate_text():
 
 @app.route("/api/evaluate/url", methods=["POST"])
 def evaluate_url():
+    not_ready = _not_ready_response()
+    if not_ready:
+        return not_ready
+
     data = request.get_json(force=True) or {}
     url = data.get("url", "").strip()
     if not url:
@@ -145,6 +200,10 @@ def evaluate_url():
 
 @app.route("/api/evaluate/pdf", methods=["POST"])
 def evaluate_pdf():
+    not_ready = _not_ready_response()
+    if not_ready:
+        return not_ready
+
     if "file" not in request.files or request.files["file"].filename == "":
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -175,7 +234,6 @@ def evaluate_status(job_id):
 
 @app.route("/api/reset", methods=["POST"])
 def reset():
-    # Nothing shared to clear -- each job owns and cleans up its own namespace
     return jsonify({"status": "ok"})
 
 

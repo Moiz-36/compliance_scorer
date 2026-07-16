@@ -53,6 +53,9 @@ async function startJob() {
   } catch (err) {
     return showError(`Network error: ${err.message}`);
   }
+  if (response.status === 503) {
+    return showError("The server is warming up (first load after inactivity) — please wait a few seconds and try again.");
+  }
 
   const data = await response.json();
   if (!response.ok) return showError(data.error || "Something went wrong.");
