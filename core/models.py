@@ -15,3 +15,7 @@ class ComplianceResult(BaseModel):
     score: float
     evidence: Optional[str] = "None"
     reasoning: Optional[str] = ""
+
+
+# Alias to support any interface/evaluator importing EvaluationResult
+EvaluationResult = ComplianceResult
