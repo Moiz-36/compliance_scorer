@@ -1,21 +1,24 @@
 # core/models.py
-from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from typing import List, Optional, Literal
 
 
 class DocumentChunk(BaseModel):
     chunk_id: str
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict  # Stores document source, article/section number, page number
 
 
-class ComplianceResult(BaseModel):
+class EvaluationResult(BaseModel):
     requirement_id: str
-    status: str  # "compliant" or "non-compliant"
-    score: float
-    evidence: Optional[str] = "None"
-    reasoning: Optional[str] = ""
+    requirement_desc: str
+    status: Literal["SATISFIED", "PARTIAL", "MISSING"]
+    evidence_text: Optional[str] = None
+    confidence_score: float
 
 
-# Alias to support any interface/evaluator importing EvaluationResult
-EvaluationResult = ComplianceResult
+class ComplianceReport(BaseModel):
+    regulation_name: str
+    overall_score: float
+    category_scores: dict
+    evaluations: List[EvaluationResult]
